@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: budget-buddy-backend
+  labels:
+    app: budget-buddy
+    tier: backend
+spec:
+  type: ClusterIP
+  selector:
+    app: budget-buddy
+    tier: backend
+  ports:
+    - protocol: TCP
+      port: 5000
+      targetPort: 5000

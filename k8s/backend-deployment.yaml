@@ -1,0 +1,56 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: budget-buddy-backend
+  labels:
+    app: budget-buddy
+    tier: backend
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: budget-buddy
+      tier: backend
+  template:
+    metadata:
+      labels:
+        app: budget-buddy
+        tier: backend
+    spec:
+      containers:
+        - name: backend
+          image: budget-buddy-backend:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 5000
+          env:
+            - name: PORT
+              value: "5000"
+            - name: DB_PATH
+              value: "/app/data/budget_buddy.db"
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi
+          volumeMounts:
+            - name: sqlite-storage
+              mountPath: /app/data
+          livenessProbe:
+            httpGet:
+              path: /api/health
+              port: 5000
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /api/health
+              port: 5000
+            initialDelaySeconds: 5
+            periodSeconds: 5
+      volumes:
+        - name: sqlite-storage
+          persistentVolumeClaim:
+            claimName: backend-sqlite-pvc
