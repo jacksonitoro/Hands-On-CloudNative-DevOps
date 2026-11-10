@@ -183,3 +183,42 @@ kubectl apply -f k8s/
 
 
 ```
+
+### Week 3: Helm Packaging, Parameterization & Release Lifecycle
+#### Overview
+**Summary:** This week focuses on transitioning from static Kubernetes manifests to reusable, parameterized Helm charts, enabling scalable, maintainable, and repeatable deployments for the Budget Buddy application across different environments.
+
+#### Objectives
+* Scaffold a standardized Helm v3 chart for the full-stack microservices application.
+* Decouple configuration from static YAML via Go templates and `values.yaml`.
+* Implement multi-tier resource templating (`Deployment`, `Service`, `PersistentVolumeClaim`).
+* Validate chart rendering with `helm lint` and `helm template`.
+* Execute release lifecycle operations: install, declarative upgrade, and automated rollback.
+
+#### Key Procedures
+1. **Chart Structure & Templating:**
+   * Modularized templates into `templates/backend/` and `templates/frontend/`.
+   * Standardized chart metadata in `Chart.yaml` using SemVer v2 specification.
+   * Parameterized compute resources, replica counts, container ports, and probe intervals.
+2. **Release Execution:**
+   ```bash
+   # Install initial release
+   helm install budget-buddy ./charts/budget-buddy
+
+   # Dynamic parameter upgrade (scale frontend replicas to 2)
+   helm upgrade budget-buddy ./charts/budget-buddy --set frontend.replicaCount=2
+
+   # Revert to base configuration
+   helm rollback budget-buddy 1
+   ```
+#### Challenges Encountered & Resolutions
+
+* ***Challenge 1: Chart Metadata Validation Failure During Linting***
+  *  ***Symptom:*** `helm lint budget-buddy` threw `[ERROR] Chart.yaml: name is required, apiVersion is required, and unable to load chart.`
+  * ***Root Cause:*** `Chart.yaml` was initialized as an empty file without mandatory Helm metadata fields.
+  * ***Resolution:*** Populated `Chart.yaml` with `apiVersion: v2, name: budget-buddy, version: 0.1.0, and appVersion: "1.0.0".`
+* ***Challenge 2: Resource Collisions with Existing Static Manifests***
+
+  * ***Symptom:*** Attempting `helm install` while Week 2 static manifests were present caused ownership and port conflicts.
+
+  * ***Resolution:*** Cleaned up static manifests via `kubectl delete -f k8s/` before deploying via Helm, allowing Helm to fully manage resource lifecycles.  
