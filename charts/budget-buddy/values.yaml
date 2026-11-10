@@ -1,0 +1,59 @@
+backend:
+  replicaCount: 1
+  image:
+    repository: budget-buddy-backend
+    tag: latest
+    pullPolicy: IfNotPresent
+  service:
+    type: ClusterIP
+    port: 5000
+  persistence:
+    accessMode: ReadWriteOnce
+    size: 1Gi
+    mountPath: /app/data
+    storageClass: ""
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 128Mi
+  probes:
+    liveness:
+      path: /api/health
+      initialDelaySeconds: 10
+      periodSeconds: 10
+    readiness:
+      path: /api/health
+      initialDelaySeconds: 5
+      periodSeconds: 5
+
+frontend:
+  replicaCount: 1
+  image:
+    repository: budget-buddy-frontend
+    tag: latest
+    pullPolicy: IfNotPresent
+  service:
+    type: NodePort
+    port: 3000
+    nodePort: 30080
+  env:
+    nextPublicApiUrl: "http://localhost:5000"
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 250m
+      memory: 256Mi
+  probes:
+    liveness:
+      path: /
+      initialDelaySeconds: 20
+      periodSeconds: 15
+    readiness:
+      path: /
+      initialDelaySeconds: 15
+      periodSeconds: 10

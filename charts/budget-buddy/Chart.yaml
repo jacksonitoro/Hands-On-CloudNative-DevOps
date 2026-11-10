@@ -1,0 +1,9 @@
+apiVersion: v2
+name: budget-buddy
+description: A Helm chart for deploying the Budget Buddy full-stack microservices application on Kubernetes
+type: application
+version: 0.1.0
+appVersion: "1.0.0"
+maintainers:
+  - name: Jackson Itoro
+    url: https://github.com/jacksonitoro
