@@ -39,13 +39,17 @@ spec:
             {{- toYaml .Values.frontend.resources | nindent 12 }}
           livenessProbe:
             httpGet:
-              path: {{ .Values.frontend.probes.liveness.path }}
-              port: {{ .Values.frontend.service.port }}
-            initialDelaySeconds: {{ .Values.frontend.probes.liveness.initialDelaySeconds }}
-            periodSeconds: {{ .Values.frontend.probes.liveness.periodSeconds }}
+              path: {{ .Values.frontend.probes.liveness.path | default "/" }}
+              port: {{ .Values.frontend.service.port | default 3000 }}
+            initialDelaySeconds: 20
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 3
           readinessProbe:
             httpGet:
-              path: {{ .Values.frontend.probes.readiness.path }}
-              port: {{ .Values.frontend.service.port }}
-            initialDelaySeconds: {{ .Values.frontend.probes.readiness.initialDelaySeconds }}
-            periodSeconds: {{ .Values.frontend.probes.readiness.periodSeconds }}
+              path: {{ .Values.frontend.probes.readiness.path | default "/" }}
+              port: {{ .Values.frontend.service.port | default 3000 }}
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
