@@ -252,109 +252,123 @@ kubectl apply -f k8s/
   * ***Resolution:*** Anchored the pattern to the repository root as `/budget-buddy/`, ensuring only the top-level application repository clone was ignored while allowing Helm charts to be tracked.
 
 
-### Week 4: Automated GitOps Continuous Delivery with ArgoCD
-#### 1. Overview & Architecture
-Week 4 transitioned the Budget Buddy deployment lifecycle from manual, client-side Helm executions (`helm install` / `helm upgrade`) to a declarative, pull-based GitOps engine managed by ArgoCD inside the local Kind cluster.
-Under this model, Git acts as the single source of truth. The cluster continuously reconciles its live state against configuration files stored in GitHub, eliminating manual drift and enabling automated rollouts and disaster recovery.
+---
+
+## Week 4: Automated GitOps Continuous Delivery with ArgoCD
+
+### 1. Architecture Overview
+Week 4 transitioned the Budget Buddy deployment lifecycle from manual, client-side Helm executions to a declarative, pull-based GitOps engine managed by **ArgoCD** inside the local Kind cluster[cite: 4, 8]. Git serves as the single source of truth, with the ArgoCD controller continuously reconciling cluster state against the GitHub repository[cite: 4].
 
 ```text
-
-┌──────────────────────────────────────────────────────────────┐
-│                 GitHub Repository (main)                     │
-│   - charts/budget-buddy (Templates & Default Values)         │
-│   - charts/budget-buddy/values-dev.yaml                      │
-│   - charts/budget-buddy/values-prod.yaml                     │
-│   - argocd/budget-buddy-dev.yaml                             │
-│   - argocd/budget-buddy-prod.yaml                            │
-└──────────────────────────────┬───────────────────────────────┘
-                               │
-                       Git Sync / Polling
-                               ▼
-┌──────────────────────────────────────────────────────────────┐
-│                  Kind Kubernetes Cluster                     │
-│                                                              │
-│  [Namespace: argocd]                                         │
-│   └── ArgoCD Controller Stack (Server, Repo Server,          │
-│       Application Controller, Redis)                         │
-│               │                                              │
-│       Reconciliation Loop (Self-Heal & Prune)                │
-│               ├──────────────────────────┐                   │
-│               ▼                          ▼                   │
-│      [Namespace: default]        [Namespace: prod]           │
-│       budget-buddy-dev            budget-buddy-prod          │
-│       ├── Backend (1 Pod)         ├── Backend (2 Pods)       │
-│       ├── Frontend (2 Pods)       ├── Frontend (3 Pods)      │
-│       ├── Services                ├── Services               │
-│       └── SQLite PVC (1Gi)        └── SQLite PVC (1Gi)       │
-└──────────────────────────────────────────────────────────────┘
-
-
-
-#### 2. Key Milestones Implemented
-
-#### A. ArgoCD Infrastructure Setup
-
-* Installed ArgoCD into a dedicated `argocd` namespace using server-side apply with conflict overrides:
-
-```bash
-kubectl apply -n argocd --server-side --force-conflicts -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml
+  ┌──────────────────────────────────────────────────────────────┐
+  │                 GitHub Repository (main)                     │
+  │   - charts/budget-buddy (Templates & Default Values)         │
+  │   - charts/budget-buddy/values-dev.yaml                      │
+  │   - charts/budget-buddy/values-prod.yaml                     │
+  │   - argocd/budget-buddy-dev.yaml                             │
+  │   - argocd/budget-buddy-prod.yaml                            │
+  └──────────────────────────────┬───────────────────────────────┘
+                                 │
+                         Git Sync / Polling
+                                 ▼
+  ┌──────────────────────────────────────────────────────────────┐
+  │                  Kind Kubernetes Cluster                     │
+  │                                                              │
+  │  [Namespace: argocd]                                         │
+  │   └── ArgoCD Controller Stack (Server, Repo Server,          │
+  │       Application Controller, Redis)                         │
+  │               │                                              │
+  │       Reconciliation Loop (Self-Heal & Prune)                │
+  │               ├──────────────────────────┐                   │
+  │               ▼                          ▼                   │
+  │      [Namespace: default]        [Namespace: prod]           │
+  │       budget-buddy-dev            budget-buddy-prod          │
+  │       ├── Backend (1 Pod)         ├── Backend (2 Pods)       │
+  │       ├── Frontend (2 Pods)       ├── Frontend (3 Pods)      │
+  │       ├── Services                ├── Services               │
+  │       └── SQLite PVC (1Gi)        └── SQLite PVC (1Gi)       │
+  └──────────────────────────────────────────────────────────────┘
 ```
-***(Server-side apply was required to bypass the 262,144-byte limit imposed on `kubectl.kubernetes.io/last-applied-configuration` annotations by the large `applicationsets.argoproj.io` CRD).***
 
-* Verified operational readiness for all seven core ArgoCD controllers and services (`argocd-server, argocd-repo-server`, `argocd-application-controller`, `argocd-redis, argocd-dex-server`, `argocd-notifications-controller`, `argocd-applicationset-controller`).
-* Extracted initial administrator credentials from secret `argocd-initial-admin-secret` and established secure local access via port-forwarding to port `8080`.
+---
 
-#### B. Declarative Application CRDs
+### 2. Implementation Milestones
 
-* Created and version-controlled declarative Custom Resources (`Application` CRD) under `argocd/` targeting the centralized GitHub repository:
+#### A. In-Cluster ArgoCD Installation
+* Deployed the official ArgoCD manifest stack into a dedicated `argocd` namespace using server-side apply:
+  ```bash
+  kubectl apply -n argocd --server-side --force-conflicts -f [https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml](https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml)
+  ```
+  *(Server-side apply bypasses the 262,144-byte limit imposed on `kubectl.kubernetes.io/last-applied-configuration` client annotations by the large `applicationsets.argoproj.io` CRD).*
+* Verified operational readiness across all core ArgoCD controllers and services: `argocd-server`, `argocd-repo-server`, `argocd-application-controller`, `argocd-redis`, `argocd-dex-server`, `argocd-notifications-controller`, and `argocd-applicationset-controller`.
+* Forwarded port `8080:443` to authenticate via the ArgoCD web console.
 
-| Specification | Development (`budget-buddy-dev.yaml`) | Production (`budget-buddy-prod.yaml`) |
-|---|---|---|
-| **Target Namespace** | `default` | `prod` (with `CreateNamespace=true`) |
-| **Chart Path** | `charts/budget-buddy` | `charts/budget-buddy` |
-| **Values Files** | `values.yaml`, `values-dev.yaml` | `values.yaml`, `values-prod.yaml` |
+![ArgoCD Dashboard Interface](assets/argocd-dashboard-interface.png)
+
+#### B. Declarative Application Custom Resources
+Authored declarative `Application` CRDs under `argocd/` targeting the GitHub repository:
+
+| Configuration | Development (`budget-buddy-dev.yaml`) | Production (`budget-buddy-prod.yaml`) |
+| :--- | :--- | :--- |
+| **Namespace** | `default` | `prod` (with `CreateNamespace=true`) |
+| **Source Path** | `charts/budget-buddy` | `charts/budget-buddy` |
+| **Value Overrides** | `values.yaml`, `values-dev.yaml` | `values.yaml`, `values-prod.yaml` |
 | **Sync Policy** | Automated (`prune: true`, `selfHeal: true`) | Automated (`prune: true`, `selfHeal: true`) |
 | **Finalizer** | `resources-finalizer.argocd.argoproj.io` | `resources-finalizer.argocd.argoproj.io` |
 
-#### C. Engineering Fixes & Root Cause Analysis
-* Symptom: Backend pod restart loops (`Exit Code: 1, npm error signal SIGTERM`) and port-forwarding connection drops (`connection refused`).
+![ArgoCD Health Check](assets/argocd-healthcheck.png)
 
-* Root Cause: Overly aggressive probe parameters (`timeoutSeconds: 1s, failureThreshold: 3`) on the `/api/health` endpoint under limited CPU requests (`50m`) caused transient probe timeouts (`context deadline exceeded while awaiting headers`), prompting Kubelet to terminate the container.
+#### C. Visual Topology & Live Reconciliation
+Inspected the live resource graph rendered by ArgoCD, confirming active reconciliation from the Git root down to Deployments, Services, ReplicaSets, and Pods.
 
-* Resolution:
+![ArgoCD Visual Topology Tree](assets/visual-topology-tree.png)
 
-  1. Updated `charts/budget-buddy/templates/backend/deployment.yaml` with relaxed probe timings (`timeoutSeconds: 5`, `failureThreshold: 5`, `initialDelaySeconds: 15`).
+---
 
-  2. Increased backend dev resource limits in `values-dev.yaml` (`cpu: 250m`, `memory: 256Mi`) to provide adequate headroom for SQLite initialization.
+### 3. Engineering Fixes & Root Cause Analysis
 
-  3. Cleaned misplaced probe YAML blocks from within the PVC volume definitions.
+* **Symptom:** Backend container termination (`npm error signal SIGTERM`, `Exit Code: 1`) and intermittent port-forward disconnections (`connect: connection refused`).
+* **Root Cause:** Probes set with overly aggressive 1s timeouts (`timeoutSeconds: 1s`, `failureThreshold: 3`). Under constrained CPU limits (`50m` / `100m`), SQLite health check responses occasionally exceeded 1s, triggering Kubelet probe failure thresholds and SIGTERM container kills.
+* **Resolution:**
+  1. Updated `charts/budget-buddy/templates/backend/deployment.yaml` with relaxed thresholds:
+     ```yaml
+     livenessProbe:
+       httpGet:
+         path: /api/health
+         port: 5000
+       initialDelaySeconds: 15
+       periodSeconds: 15
+       timeoutSeconds: 5
+       failureThreshold: 5
+     ```
+  2. Increased CPU/memory limits in `charts/budget-buddy/values-dev.yaml` (`cpu: 250m`, `memory: 256Mi`) to provide startup headroom.
+  3. Cleaned out misplaced probe blocks accidentally placed in the volume mount spec.
 
-#### 3. Verification & Evidence
+---
 
-#### A. Automated GitOps Continuous Delivery (Scale via Git)
+### 4. GitOps Verification & Live Demonstrations
 
-* *Action:* Updated `frontend.replicaCount: 2` in `charts/budget-buddy/values-dev.yaml` and pushed commit `841dccc` to `main`.
-
-* *Result:* ArgoCD polled the repository, marked the application `OutOfSync`, initiated automated synchronization, and scaled `budget-buddy-dev-frontend` to `2/2` replicas without executing manual `helm` or `kubectl` commands.
-
+#### A. Continuous Delivery via Git Push
+Scaled the development frontend from 1 to 2 replicas purely via Git:
+1. Updated `frontend.replicaCount: 2` in `charts/budget-buddy/values-dev.yaml`.
+2. Committed and pushed to `main`.
+3. ArgoCD detected commit `841dccc`, initiated automated synchronization, and dynamically scaled the deployment without running manual `kubectl` or `helm` commands:
 
 ```text
 $ kubectl get deployments -l app.kubernetes.io/instance=budget-buddy-dev
 NAME                        READY   UP-TO-DATE   AVAILABLE   AGE
 budget-buddy-dev-backend    1/1     1            1           72m
 budget-buddy-dev-frontend   2/2     2            2           60m
-
 ```
 
 #### B. Self-Healing & Drift Correction
-  * Action: Manually deleted `deployment/budget-buddy-dev-frontend` directly from the cluster using `kubectl delete deployment`.
-
-  * Result: ArgoCD detected out-of-band cluster drift against the Git state and restored the frontend deployment within seconds (`selfHeal: true`).
+* Manually deleted `deployment/budget-buddy-dev-frontend` directly from the cluster.
+* ArgoCD identified cluster drift against Git state within seconds and automatically regenerated the deployment resource without human intervention (`selfHeal: true`).
 
 #### C. Multi-Environment Isolation Verification
-  * Verified concurrent deployment across both environments (`default` and `prod`) reflecting their respective values profiles:
+Verified running instances across both namespaces reflecting their distinct tier configurations:
 
-```Plaintext
+```text
 $ kubectl get pods -A -l app.kubernetes.io/name=budget-buddy
 NAMESPACE   NAME                                         READY   STATUS    RESTARTS   AGE
 default     budget-buddy-dev-backend-855f6b7c8c-6xgx4    1/1     Running   0          170m
@@ -365,34 +379,9 @@ prod        budget-buddy-prod-backend-6fb5f9b8f5-f5sxb   1/1     Running   0    
 prod        budget-buddy-prod-frontend-77d885cd5-clf8v   1/1     Running   2          139m
 prod        budget-buddy-prod-frontend-77d885cd5-l5bwb   1/1     Running   1          139m
 prod        budget-buddy-prod-frontend-77d885cd5-n6m5k   1/1     Running   2          139m
-
-
 ```
 
-#### D. Full-Stack Browser & Persistence Verification
-
-* Port-forwarded frontend (`3000:3000`) and backend (`5000:5000`) services.   
-* Verified backend health check returns `HTTP/1.1 200 OK` (`{"status":"OK","message":"Budget Buddy API is running"}`).   
-* Verified UI operations: successfully submitted monthly budgets and recorded daily expense transactions to the bound PersistentVolumeClaim (`budget_buddy.db`) with zero client-side fetch errors. 
-
-### Week 4: GitOps Continuous Delivery with ArgoCD
-
-#### Milestones Achieved
-1. **ArgoCD In-Cluster Installation:**
-   - Deployed the ArgoCD controller stack into the `argocd` namespace on Kind via server-side apply (`--server-side --force-conflicts`).
-   - Forwarded port `8080` to access the ArgoCD administrative UI and verified initial admin authentication.
-
-2. **Declarative GitOps Custom Resources:**
-   - Authored declarative `Application` CRDs in `argocd/budget-buddy-dev.yaml` and `argocd/budget-buddy-prod.yaml`.
-   - Connected both applications to the GitHub repository source (`charts/budget-buddy`) targeting the `main` branch.
-   - Configured automated sync policies with `prune: true` and `selfHeal: true`.
-
-3. **Multi-Environment Promotion:**
-   - **Dev (`default` namespace):** Uses `values-dev.yaml` (1 backend replica, 2 frontend replicas, lightweight compute footprints).
-   - **Prod (`prod` namespace):** Uses `values-prod.yaml` (2 backend replicas with SQLite PVC, 3 frontend replicas, higher compute allocations).
-
-4. **Evidence-Based GitOps Verification:**
-   - **Automated Self-Healing:** Simulated manual cluster drift by deleting the frontend deployment via `kubectl`. ArgoCD detected the missing state and restored the deployment within seconds without manual intervention.
-   - **Git-Driven Continuous Delivery:** Scaled frontend replicas from 1 to 2 by pushing a commit to `values-dev.yaml`. ArgoCD reconciled the change and scaled up pods automatically.
-   - **Probe Tuning & Stability:** Identified and resolved probe timeouts (`timeoutSeconds: 5`, `failureThreshold: 5`) and resource headroom constraints, ensuring 100% stable `Running` pods across both namespaces.
-
+#### D. End-to-End Application Validation
+* Port-forwarded frontend (`3000:3000`) and backend (`5000:5000`) endpoints[cite: 6].
+* Validated `/api/health` returned `HTTP/1.1 200 OK` (`{"status":"OK","message":"Budget Buddy API is running"}`)[cite: 6].
+* Verified browser functionality: submitted monthly budgets and tracked expenses successfully with SQLite persistent storage on the bound PVC[cite: 6].
