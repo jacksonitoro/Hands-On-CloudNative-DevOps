@@ -38,16 +38,20 @@ spec:
               mountPath: {{ .Values.backend.persistence.mountPath }}
           livenessProbe:
             httpGet:
-              path: {{ .Values.backend.probes.liveness.path }}
+              path: {{ .Values.backend.probes.liveness.path | default "/api/health" }}
               port: {{ .Values.backend.service.port }}
-            initialDelaySeconds: {{ .Values.backend.probes.liveness.initialDelaySeconds }}
-            periodSeconds: {{ .Values.backend.probes.liveness.periodSeconds }}
+            initialDelaySeconds: 15
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 5
           readinessProbe:
             httpGet:
-              path: {{ .Values.backend.probes.readiness.path }}
+              path: {{ .Values.backend.probes.readiness.path | default "/api/health" }}
               port: {{ .Values.backend.service.port }}
-            initialDelaySeconds: {{ .Values.backend.probes.readiness.initialDelaySeconds }}
-            periodSeconds: {{ .Values.backend.probes.readiness.periodSeconds }}
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 5
       volumes:
         - name: sqlite-storage
           persistentVolumeClaim:
