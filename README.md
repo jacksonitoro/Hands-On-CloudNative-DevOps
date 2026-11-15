@@ -385,3 +385,68 @@ prod        budget-buddy-prod-frontend-77d885cd5-n6m5k   1/1     Running   2    
 * Port-forwarded frontend (`3000:3000`) and backend (`5000:5000`) endpoints[cite: 6].
 * Validated `/api/health` returned `HTTP/1.1 200 OK` (`{"status":"OK","message":"Budget Buddy API is running"}`)[cite: 6].
 * Verified browser functionality: submitted monthly budgets and tracked expenses successfully with SQLite persistent storage on the bound PVC[cite: 6].
+
+### 5. Observability & Container Optimization (Kubernetes + GitOps)
+
+To support full-stack telemetry across the `default` (dev) and `prod` namespaces on a single-node Kind Kubernetes cluster, the application containers were further slimmed using Alpine multi-stage builds, and a GitOps-managed observability stack was deployed via ArgoCD.
+
+#### 🐳 Alpine Multi-Stage Image Optimization
+
+Building on the initial Sprint 11 `bookworm-slim` optimization[cite: 10], both runtime stages were migrated to `node:20-alpine` (preserving Next.js `standalone` output on the frontend and compiling native `sqlite3` dependencies with `sqlite-dev` on the backend):
+
+| Service | Unoptimized | Bookworm-Slim | Alpine Optimized | Total Reduction |
+| :--- | :--- | :--- | :--- | :--- |
+| **Backend** (`budget-buddy-backend`) | 915 MB[cite: 10] | 350 MB | **228 MB** | **~75%** |
+| **Frontend** (`budget-buddy-frontend`) | 1.31 GB[cite: 10] | 402 MB | **305 MB** | **~77%** |
+
+---
+
+#### 📊 Observability Architecture
+
+All monitoring and logging components run in the `monitoring` namespace and are declaratively managed by ArgoCD (`argocd/values-monitoring.yaml` and `argocd/values-logging.yaml`):
+
+```text
+  Budget Buddy Pods (default & prod)
+        │                       │
+  GET /metrics             stdout logs
+        ▼                       ▼
+   Prometheus               Promtail (DaemonSet)
+        │                       │
+        │                 HTTP Push (:3100)
+        │                       ▼
+        │                     Loki
+        │                       │
+        └───────────┬───────────┘
+                    ▼
+                 Grafana
+      (Unified Metrics & Logs UI)
+```
+#### Observability Stack
+
+- **Metrics (`kube-prometheus-stack`):** Prometheus discovers and scrapes backend `ServiceMonitor` targets across both the `default` and `prod` namespaces (`serviceMonitorSelectorNilUsesHelmValues: false`). It tracks `http_request_duration_seconds` (request rate and P95 latency) alongside Node.js runtime metrics.
+- **Centralized logging (`loki-stack`):** Promtail runs as a DaemonSet that tails container logs and ships them to `http://logging-stack-loki:3100/loki/api/v1/push`, with a 30s batch timeout tuned for local Kind resource limits.
+- **Visualization (Grafana):** Pre-provisioned with Prometheus (default datasource) and Loki (`isDefault: false`). It powers the Budget Buddy Observability dashboard (HTTP request rate, P95 latency, and live backend logs).
+
+### Access Commands
+
+1. **Verify the observability pods**
+
+   ```bash
+   kubectl get pods -n monitoring
+   ```
+
+2. **Forward the Grafana UI** (login: `admin` / `admin`)
+
+   ```bash
+   kubectl port-forward svc/monitoring-stack-grafana -n monitoring 3001:80
+   ```
+
+   Open `http://localhost:3001`.
+
+3. **Forward the Prometheus targets UI**
+
+   ```bash
+   kubectl port-forward svc/monitoring-stack-prometheus -n monitoring 9091:9090
+   ```
+
+   Open `http://localhost:9091/targets`.
