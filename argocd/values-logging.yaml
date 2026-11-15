@@ -5,21 +5,28 @@ loki:
   isDefault: false
   resources:
     requests:
-      cpu: 50m
-      memory: 128Mi
-    limits:
-      cpu: 250m
+      cpu: 100m
       memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
 
 promtail:
   enabled: true
+  config:
+    clients:
+      - url: http://logging-stack-loki:3100/loki/api/v1/push
+        timeout: 30s
+        backoff_config:
+          min_period: 500ms
+          max_period: 10s
   resources:
     requests:
-      cpu: 25m
+      cpu: 50m
       memory: 64Mi
     limits:
-      cpu: 100m
-      memory: 128Mi
+      cpu: 250m
+      memory: 192Mi
 
 grafana:
   enabled: false
