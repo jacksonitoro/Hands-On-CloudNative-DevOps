@@ -2,6 +2,7 @@ loki:
   enabled: true
   persistence:
     enabled: false
+  isDefault: false
   resources:
     requests:
       cpu: 50m
@@ -22,5 +23,8 @@ promtail:
 
 grafana:
   enabled: false
+  sidecar:
+    datasources:
+      enabled: false
 prometheus:
   enabled: false
